@@ -1,123 +1,271 @@
-import { useState, useEffect } from 'react';
-import MenuManager from './components/MenuManager';
-import OrderBuilder from './components/OrderBuilder';
-import BalanceDashboard from './components/BalanceDashboard';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
-const STORAGE_KEYS = {
-  menu: 'mm_menu',
-  orders: 'mm_orders',
-  balance: 'mm_balance',
+const LEVELS_TOTAL = 500;
+const STORAGE_LEVEL = 'nonogram_level';
+
+const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+
+const createSeededRandom = (seed) => {
+  let t = seed + 0x6d2b79f5;
+  return () => {
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
 };
 
-function load(key, fallback) {
-  try {
-    const raw = localStorage.getItem(key);
-    return raw ? JSON.parse(raw) : fallback;
-  } catch {
-    return fallback;
-  }
-}
+const makeEmptyBoard = (size) => Array.from({ length: size }, () => Array(size).fill(0));
 
-function save(key, value) {
-  try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
-}
+const getClueRuns = (line) => {
+  const runs = [];
+  let run = 0;
+  line.forEach((cell) => {
+    if (cell) run += 1;
+    else if (run) {
+      runs.push(run);
+      run = 0;
+    }
+  });
+  if (run) runs.push(run);
+  return runs.length ? runs : [0];
+};
 
-const TABS = [
-  { id: 'menu', label: 'Menu', icon: '🍽️' },
-  { id: 'order', label: 'New Order', icon: '🛒' },
-  { id: 'dashboard', label: 'Dashboard', icon: '💰' },
-];
+const buildLevel = (levelIndex) => {
+  const lvl = levelIndex + 1;
+  const size = clamp(5 + Math.floor(levelIndex / 45), 5, 15);
+  const density = clamp(0.3 + levelIndex / 1500, 0.3, 0.62);
+  const random = createSeededRandom(lvl * 97);
+  const solution = Array.from({ length: size }, () =>
+    Array.from({ length: size }, () => random() < density)
+  );
+
+  if (solution.every((row) => row.every((cell) => !cell))) solution[0][0] = true;
+
+  const rowClues = solution.map(getClueRuns);
+  const colClues = Array.from({ length: size }, (_, c) =>
+    getClueRuns(Array.from({ length: size }, (_, r) => solution[r][c]))
+  );
+
+  return {
+    id: lvl,
+    size,
+    difficulty:
+      lvl < 100 ? 'Easy' : lvl < 240 ? 'Normal' : lvl < 380 ? 'Hard' : lvl < 470 ? 'Expert' : 'Master',
+    solution,
+    rowClues,
+    colClues,
+  };
+};
 
 export default function App() {
-  const [tab, setTab] = useState('menu');
-  const [menuItems, setMenuItems] = useState(() => load(STORAGE_KEYS.menu, []));
-  const [orders, setOrders] = useState(() => load(STORAGE_KEYS.orders, []));
-  const [balance, setBalance] = useState(() => load(STORAGE_KEYS.balance, 0));
+  const [levelIndex, setLevelIndex] = useState(() => {
+    const raw = Number(localStorage.getItem(STORAGE_LEVEL));
+    return Number.isInteger(raw) ? clamp(raw, 0, LEVELS_TOTAL - 1) : 0;
+  });
+  const [mode, setMode] = useState('fill');
+  const [mistakes, setMistakes] = useState(0);
+  const audioRef = useRef(null);
 
-  useEffect(() => { save(STORAGE_KEYS.menu, menuItems); }, [menuItems]);
-  useEffect(() => { save(STORAGE_KEYS.orders, orders); }, [orders]);
-  useEffect(() => { save(STORAGE_KEYS.balance, balance); }, [balance]);
+  const level = useMemo(() => buildLevel(levelIndex), [levelIndex]);
+  const [board, setBoard] = useState(() => makeEmptyBoard(level.size));
 
-  const handleAddItem = (item) => {
-    setMenuItems((prev) => [...prev, { ...item, id: Date.now() }]);
+  useEffect(() => {
+    localStorage.setItem(STORAGE_LEVEL, String(levelIndex));
+  }, [levelIndex]);
+
+  const completed = useMemo(
+    () => level.solution.every((row, r) =>
+      row.every((isFilled, c) => (isFilled ? board[r][c] === 1 : board[r][c] !== 1))
+    ),
+    [board, level]
+  );
+
+  const playTone = (frequency, duration, type, volume) => {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return;
+    if (!audioRef.current) audioRef.current = new Ctx();
+    const ctx = audioRef.current;
+    const now = ctx.currentTime;
+    const oscillator = ctx.createOscillator();
+    const gain = ctx.createGain();
+    oscillator.type = type;
+    oscillator.frequency.setValueAtTime(frequency, now);
+    gain.gain.setValueAtTime(volume, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
+    oscillator.connect(gain);
+    gain.connect(ctx.destination);
+    oscillator.start(now);
+    oscillator.stop(now + duration);
   };
 
-  const handleDeleteItem = (id) => {
-    setMenuItems((prev) => prev.filter((i) => i.id !== id));
+  const playRightSound = () => {
+    playTone(900, 0.05, 'triangle', 0.08);
+    setTimeout(() => playTone(1120, 0.04, 'triangle', 0.05), 30);
   };
 
-  const handleEditItem = (id, updates) => {
-    setMenuItems((prev) => prev.map((i) => (i.id === id ? { ...i, ...updates } : i)));
+  const playWrongSound = () => {
+    playTone(170, 0.12, 'sine', 0.12);
   };
 
-  const handleSubmitOrder = (order) => {
-    const newOrder = { ...order, id: Date.now(), timestamp: new Date().toISOString() };
-    setOrders((prev) => [...prev, newOrder]);
-    setBalance((prev) => +(prev + order.total).toFixed(2));
+  const applyCell = (r, c, forceMode) => {
+    if (completed) return;
+    const activeMode = forceMode ?? mode;
+    setBoard((prev) => {
+      const next = prev.map((row) => [...row]);
+      const current = next[r][c];
+      const shouldFill = level.solution[r][c];
+
+      if (activeMode === 'mark') {
+        if (current !== 1) next[r][c] = current === -1 ? 0 : -1;
+        return next;
+      }
+
+      if (current === 1) {
+        next[r][c] = 0;
+        return next;
+      }
+
+      if (shouldFill) {
+        next[r][c] = 1;
+        playRightSound();
+      } else {
+        next[r][c] = -1;
+        playWrongSound();
+        setMistakes((m) => m + 1);
+      }
+      return next;
+    });
   };
+
+  const goToLevel = (nextIndex) => {
+    const clamped = clamp(nextIndex, 0, LEVELS_TOTAL - 1);
+    const nextLevelData = buildLevel(clamped);
+    setLevelIndex(clamped);
+    setBoard(makeEmptyBoard(nextLevelData.size));
+    setMistakes(0);
+  };
+
+  const nextLevel = () => goToLevel(levelIndex + 1);
+  const prevLevel = () => goToLevel(levelIndex - 1);
+  const resetLevel = () => {
+    setBoard(makeEmptyBoard(level.size));
+    setMistakes(0);
+  };
+
+  const maxColClue = Math.max(...level.colClues.map((c) => c.length));
 
   return (
-    <div className="min-h-screen flex flex-col">
-      {/* Header */}
-      <header className="border-b border-gray-800 bg-gray-900/80 backdrop-blur sticky top-0 z-20">
-        <div className="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between gap-4 flex-wrap">
-          <div className="flex items-center gap-3">
-            <span className="text-3xl">🍴</span>
-            <div>
-              <h1 className="text-xl font-extrabold text-white leading-tight">Menu Manager</h1>
-              <p className="text-xs text-gray-500">Restaurant POS System</p>
-            </div>
+    <div className="min-h-screen bg-slate-950 text-slate-100 p-4 md:p-6">
+      <div className="max-w-6xl mx-auto card p-5 md:p-8 space-y-6">
+        <header className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
+          <div>
+            <p className="text-xs uppercase tracking-[0.2em] text-violet-300">Ultra Nonogram</p>
+            <h1 className="text-2xl md:text-4xl font-black">500 Levels Challenge</h1>
+            <p className="text-slate-400">Correct fill = click sound • Wrong fill = knock + X mark</p>
           </div>
-          <div className="flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl px-4 py-2">
-            <span className="text-emerald-400 text-sm font-semibold">Balance</span>
-            <span className="text-emerald-400 font-extrabold text-lg">${balance.toFixed(2)}</span>
+          <div className="text-right">
+            <p className="text-sm text-slate-400">Difficulty</p>
+            <p className="text-xl font-extrabold text-violet-300">{level.difficulty}</p>
           </div>
-        </div>
-      </header>
+        </header>
 
-      {/* Tab bar */}
-      <nav className="bg-gray-900/60 border-b border-gray-800 sticky top-[73px] z-10">
-        <div className="max-w-6xl mx-auto px-4 py-2 flex gap-2">
-          {TABS.map((t) => (
+        <section className="grid gap-3 md:grid-cols-[1fr_auto] items-center">
+          <div className="flex flex-wrap items-center gap-2">
+            <button className="btn-secondary" onClick={prevLevel} disabled={level.id === 1}>Prev</button>
+            <button className="btn-secondary" onClick={nextLevel} disabled={level.id === LEVELS_TOTAL}>Next</button>
+            <button className="btn-secondary" onClick={resetLevel}>Restart</button>
             <button
-              key={t.id}
-              onClick={() => setTab(t.id)}
-              className={`tab-btn flex items-center gap-2 ${tab === t.id ? 'tab-active' : 'tab-inactive'}`}
+              className={mode === 'fill' ? 'btn-primary' : 'btn-secondary'}
+              onClick={() => setMode('fill')}
             >
-              <span>{t.icon}</span>
-              <span className="hidden sm:inline">{t.label}</span>
-              {t.id === 'order' && menuItems.length > 0 && (
-                <span className="badge bg-amber-500/20 text-amber-400">{menuItems.length}</span>
-              )}
-              {t.id === 'dashboard' && orders.length > 0 && (
-                <span className="badge bg-emerald-500/20 text-emerald-400">{orders.length}</span>
-              )}
+              Fill Mode
             </button>
-          ))}
+            <button
+              className={mode === 'mark' ? 'btn-primary' : 'btn-secondary'}
+              onClick={() => setMode('mark')}
+            >
+              Mark Mode
+            </button>
+          </div>
+          <div className="text-sm md:text-right">
+            <p>Level <span className="font-bold text-violet-300">{level.id}</span> / {LEVELS_TOTAL}</p>
+            <p>Mistakes: <span className="font-bold text-rose-300">{mistakes}</span></p>
+          </div>
+        </section>
+
+        <input
+          type="range"
+          min={1}
+          max={LEVELS_TOTAL}
+          value={level.id}
+          onChange={(e) => goToLevel(Number(e.target.value) - 1)}
+          className="w-full accent-violet-400"
+        />
+
+        {completed && (
+          <div className="rounded-2xl border border-emerald-400/30 bg-emerald-500/10 px-4 py-3">
+            <p className="font-bold text-emerald-300">Puzzle solved! Great job.</p>
+          </div>
+        )}
+
+        <div className="overflow-auto rounded-2xl border border-slate-700/70 p-3 bg-slate-900/80">
+          <div className="w-max mx-auto">
+            <table className="border-separate border-spacing-1">
+              <tbody>
+                <tr>
+                  <td className="align-bottom pr-2 text-slate-500 text-xs">Clues</td>
+                  {Array.from({ length: level.size }, (_, c) => (
+                    <td key={`top-${c}`} className="align-bottom">
+                      <div
+                        className="grid gap-0.5 justify-items-center min-w-7"
+                        style={{ gridTemplateRows: `repeat(${maxColClue}, 1rem)` }}
+                      >
+                        {Array.from({ length: maxColClue }, (_, i) => {
+                          const clue = level.colClues[c][level.colClues[c].length - maxColClue + i];
+                          return (
+                            <span key={`col-${c}-${i}`} className="text-xs text-slate-200 font-semibold">
+                              {clue ?? ''}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    </td>
+                  ))}
+                </tr>
+                {board.map((row, r) => (
+                  <tr key={`row-${r}`}>
+                    <td className="pr-2 whitespace-nowrap text-xs text-slate-300 font-semibold">
+                      {level.rowClues[r].join(' ')}
+                    </td>
+                    {row.map((cell, c) => (
+                      <td key={`cell-${r}-${c}`}>
+                        <button
+                          onClick={() => applyCell(r, c)}
+                          onContextMenu={(e) => {
+                            e.preventDefault();
+                            applyCell(r, c, 'mark');
+                          }}
+                          className={`h-7 w-7 border border-slate-700 rounded-sm text-sm font-black transition
+                            ${cell === 1 ? 'bg-slate-100 border-slate-200 text-slate-900' : ''}
+                            ${cell === -1 ? 'bg-rose-500/20 border-rose-400/60 text-rose-300' : ''}
+                            ${cell === 0 ? 'bg-slate-800 hover:bg-slate-700' : ''}`}
+                          aria-label={`cell-${r}-${c}`}
+                        >
+                          {cell === -1 ? '✕' : ''}
+                        </button>
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
-      </nav>
 
-      {/* Main */}
-      <main className="flex-1 max-w-6xl w-full mx-auto px-4 py-6">
-        {tab === 'menu' && (
-          <MenuManager
-            menuItems={menuItems}
-            onAdd={handleAddItem}
-            onDelete={handleDeleteItem}
-            onEdit={handleEditItem}
-          />
-        )}
-        {tab === 'order' && (
-          <OrderBuilder menuItems={menuItems} onSubmitOrder={handleSubmitOrder} />
-        )}
-        {tab === 'dashboard' && (
-          <BalanceDashboard orders={orders} balance={balance} />
-        )}
-      </main>
-
-      <footer className="border-t border-gray-800 text-center py-4 text-xs text-gray-600">
-        Menu Manager — All amounts are simulated (fake money)
-      </footer>
+        <p className="text-xs text-slate-500">
+          Tip: Left click for current mode. Right click always toggles an X mark.
+        </p>
+      </div>
     </div>
   );
 }
