@@ -1,30 +1,16 @@
 export default function BalanceDashboard({ orders, balance }) {
-  const asMoney = (value, fallback = 0) => {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) && parsed >= 0 ? +parsed.toFixed(2) : fallback;
-  };
+  const { grossRevenue, subtotalRevenue, tipsRevenue } = orders.reduce(
+    (totals, order) => ({
+      grossRevenue: totals.grossRevenue + order.total,
+      subtotalRevenue: totals.subtotalRevenue + order.subtotal,
+      tipsRevenue: totals.tipsRevenue + order.tip,
+    }),
+    { grossRevenue: 0, subtotalRevenue: 0, tipsRevenue: 0 }
+  );
+  const avgOrder = orders.length > 0 ? grossRevenue / orders.length : 0;
+  const avgTip = orders.length > 0 ? tipsRevenue / orders.length : 0;
 
-  const normalizedOrders = orders.map((order) => {
-    const subtotal = asMoney(order.subtotal, asMoney(order.total, 0));
-    const tip = asMoney(order.tip, 0);
-    return {
-      ...order,
-      subtotal,
-      tip,
-      total: +(subtotal + tip).toFixed(2),
-      items: Array.isArray(order.items) ? order.items : [],
-      customer: order.customer || 'Guest',
-      note: typeof order.note === 'string' ? order.note : '',
-    };
-  });
-
-  const grossRevenue = normalizedOrders.reduce((sum, order) => sum + order.total, 0);
-  const subtotalRevenue = normalizedOrders.reduce((sum, order) => sum + order.subtotal, 0);
-  const tipsRevenue = normalizedOrders.reduce((sum, order) => sum + order.tip, 0);
-  const avgOrder = normalizedOrders.length > 0 ? grossRevenue / normalizedOrders.length : 0;
-  const avgTip = normalizedOrders.length > 0 ? tipsRevenue / normalizedOrders.length : 0;
-
-  const todayOrders = normalizedOrders.filter((o) => {
+  const todayOrders = orders.filter((o) => {
     const d = new Date(o.timestamp);
     const now = new Date();
     return d.toDateString() === now.toDateString();
@@ -33,7 +19,7 @@ export default function BalanceDashboard({ orders, balance }) {
   const todayTips = todayOrders.reduce((sum, order) => sum + order.tip, 0);
 
   const topItems = Object.values(
-    normalizedOrders.flatMap((o) => o.items).reduce((acc, item) => {
+    orders.flatMap((o) => o.items).reduce((acc, item) => {
       if (!acc[item.name]) acc[item.name] = { name: item.name, qty: 0, revenue: 0 };
       acc[item.name].qty += item.qty;
       acc[item.name].revenue += item.price * item.qty;
@@ -54,7 +40,7 @@ export default function BalanceDashboard({ orders, balance }) {
         <StatCard
           icon="📦"
           label="Total Orders"
-          value={normalizedOrders.length}
+          value={orders.length}
           valueClass="text-amber-400"
         />
         <StatCard
@@ -108,7 +94,7 @@ export default function BalanceDashboard({ orders, balance }) {
             <span className="text-2xl">🧾</span> Order History
           </h2>
 
-          {normalizedOrders.length === 0 ? (
+          {orders.length === 0 ? (
             <div className="text-center py-12 text-gray-500">
               <p className="text-5xl mb-3">📭</p>
               <p className="text-lg font-medium">No orders yet</p>
@@ -116,7 +102,7 @@ export default function BalanceDashboard({ orders, balance }) {
             </div>
           ) : (
             <div className="space-y-3 max-h-96 overflow-y-auto pr-1">
-              {[...normalizedOrders].reverse().map((order) => (
+              {[...orders].reverse().map((order) => (
                 <div key={order.id} className="px-4 py-3 rounded-xl bg-gray-800/60 border border-gray-800">
                   <div className="flex items-start justify-between gap-2 mb-1.5">
                     <div>

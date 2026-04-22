@@ -51,7 +51,13 @@ function load(key, fallback) {
 }
 
 function save(key, value) {
-  try { localStorage.setItem(key, JSON.stringify(value)); } catch { return; }
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+    return true;
+  } catch (error) {
+    if (error instanceof TypeError || error instanceof DOMException) return false;
+    throw error;
+  }
 }
 
 const TABS = [
@@ -66,15 +72,10 @@ export default function App() {
   const [orders, setOrders] = useState(() =>
     load(STORAGE_KEYS.orders, []).map(normalizeOrder)
   );
-  const [balance, setBalance] = useState(() => {
-    const storedBalance = toMoney(load(STORAGE_KEYS.balance, Number.NaN), Number.NaN);
-    if (Number.isFinite(storedBalance)) return storedBalance;
-    return +load(STORAGE_KEYS.orders, []).map(normalizeOrder).reduce((sum, order) => sum + order.total, 0).toFixed(2);
-  });
+  const balance = getGrossFromOrders(orders);
 
   useEffect(() => { save(STORAGE_KEYS.menu, menuItems); }, [menuItems]);
   useEffect(() => { save(STORAGE_KEYS.orders, orders); }, [orders]);
-  useEffect(() => { setBalance(getGrossFromOrders(orders)); }, [orders]);
   useEffect(() => { save(STORAGE_KEYS.balance, balance); }, [balance]);
 
   const handleAddItem = (item) => {

@@ -37,7 +37,7 @@ export default function OrderBuilder({ menuItems, onSubmitOrder }) {
   const subtotal = +orderItems.reduce((sum, o) => sum + o.price * o.qty, 0).toFixed(2);
   const parsedTip = tipInput.trim() === '' ? 0 : Number.parseFloat(tipInput);
   const tipIsInvalid = tipInput.trim() !== '' && (!Number.isFinite(parsedTip) || parsedTip < 0);
-  const tip = tipIsInvalid ? 0 : +Math.max(parsedTip, 0).toFixed(2);
+  const tip = tipIsInvalid ? 0 : +parsedTip.toFixed(2);
   const total = +(subtotal + tip).toFixed(2);
 
   const handleSubmit = () => {
