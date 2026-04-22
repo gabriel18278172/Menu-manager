@@ -1,11 +1,22 @@
 export default function BalanceDashboard({ orders, balance }) {
+  const { grossRevenue, subtotalRevenue, tipsRevenue } = orders.reduce(
+    (totals, order) => ({
+      grossRevenue: totals.grossRevenue + order.total,
+      subtotalRevenue: totals.subtotalRevenue + order.subtotal,
+      tipsRevenue: totals.tipsRevenue + order.tip,
+    }),
+    { grossRevenue: 0, subtotalRevenue: 0, tipsRevenue: 0 }
+  );
+  const avgOrder = orders.length > 0 ? grossRevenue / orders.length : 0;
+  const avgTip = orders.length > 0 ? tipsRevenue / orders.length : 0;
+
   const todayOrders = orders.filter((o) => {
     const d = new Date(o.timestamp);
     const now = new Date();
     return d.toDateString() === now.toDateString();
   });
-  const todayRevenue = todayOrders.reduce((s, o) => s + o.total, 0);
-  const avgOrder = orders.length > 0 ? balance / orders.length : 0;
+  const todayRevenue = todayOrders.reduce((sum, order) => sum + order.total, 0);
+  const todayTips = todayOrders.reduce((sum, order) => sum + order.tip, 0);
 
   const topItems = Object.values(
     orders.flatMap((o) => o.items).reduce((acc, item) => {
@@ -19,7 +30,7 @@ export default function BalanceDashboard({ orders, balance }) {
   return (
     <div className="space-y-6">
       {/* Stats row */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
         <StatCard
           icon="💰"
           label="Total Balance"
@@ -33,16 +44,46 @@ export default function BalanceDashboard({ orders, balance }) {
           valueClass="text-amber-400"
         />
         <StatCard
-          icon="📅"
-          label="Today's Revenue"
-          value={`$${todayRevenue.toFixed(2)}`}
+          icon="🧾"
+          label="Subtotal Revenue"
+          value={`$${subtotalRevenue.toFixed(2)}`}
           valueClass="text-sky-400"
         />
         <StatCard
-          icon="📊"
-          label="Avg. Order Value"
-          value={`$${avgOrder.toFixed(2)}`}
+          icon="💵"
+          label="Tips Collected"
+          value={`$${tipsRevenue.toFixed(2)}`}
+          valueClass="text-amber-400"
+        />
+        <StatCard
+          icon="📅"
+          label="Today's Gross"
+          value={`$${todayRevenue.toFixed(2)}`}
+          valueClass="text-emerald-400"
+        />
+        <StatCard
+          icon="✨"
+          label="Today's Tips"
+          value={`$${todayTips.toFixed(2)}`}
           valueClass="text-purple-400"
+        />
+        <StatCard
+          icon="📊"
+          label="Avg. Order"
+          value={`$${avgOrder.toFixed(2)}`}
+          valueClass="text-blue-400"
+        />
+        <StatCard
+          icon="🪙"
+          label="Avg. Tip"
+          value={`$${avgTip.toFixed(2)}`}
+          valueClass="text-amber-300"
+        />
+        <StatCard
+          icon="💸"
+          label="Gross Revenue"
+          value={`$${grossRevenue.toFixed(2)}`}
+          valueClass="text-emerald-300"
         />
       </div>
 
@@ -71,6 +112,11 @@ export default function BalanceDashboard({ orders, balance }) {
                       )}
                     </div>
                     <span className="text-emerald-400 font-bold shrink-0">${order.total.toFixed(2)}</span>
+                  </div>
+                  <div className="mb-1 text-xs text-gray-500 flex items-center gap-3 flex-wrap">
+                    <span>Subtotal: ${order.subtotal.toFixed(2)}</span>
+                    <span className="text-amber-400">Tip: ${order.tip.toFixed(2)}</span>
+                    <span className="text-emerald-300">Total: ${order.total.toFixed(2)}</span>
                   </div>
                   <p className="text-sm text-gray-400 mb-1">
                     {order.items.map((i) => `${i.name} ×${i.qty}`).join(', ')}

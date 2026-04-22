@@ -6,7 +6,8 @@ A polished restaurant POS (Point of Sale) web app built with React + Vite + Tail
 
 - **Menu Management** — Add, edit, and remove menu items with name, category, and price.
 - **Order Builder** — Select items from the menu, adjust quantities, name the customer, and charge the total.
-- **Dashboard** — Track your total balance, order history, today's revenue, average order value, and top-selling items.
+- **Tip-aware Checkout** — Add an optional tip with a clear subtotal/tip/total breakdown before charging.
+- **Dashboard** — Track gross revenue, subtotal revenue, tips, order history, today's totals, averages, and top-selling items.
 - **Persistent Storage** — All data is saved in `localStorage` so it survives page refreshes.
 - *All money is simulated (fake) — for practice/demo purposes only.*
 

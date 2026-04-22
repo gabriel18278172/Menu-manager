@@ -9,6 +9,38 @@ const STORAGE_KEYS = {
   balance: 'mm_balance',
 };
 
+function toMoney(value, fallback = 0) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? +parsed.toFixed(2) : fallback;
+}
+
+function getItemsSubtotal(items = []) {
+  return +items.reduce((sum, item) => sum + (Number(item.price) || 0) * (Number(item.qty) || 0), 0).toFixed(2);
+}
+
+function normalizeOrder(order) {
+  const items = Array.isArray(order?.items) ? order.items : [];
+  const hasBreakdown = order?.subtotal !== undefined || order?.tip !== undefined;
+  const legacyTotal = toMoney(order?.total, getItemsSubtotal(items));
+  const subtotal = hasBreakdown ? toMoney(order?.subtotal, getItemsSubtotal(items)) : legacyTotal;
+  const tip = hasBreakdown ? toMoney(order?.tip, 0) : 0;
+
+  return {
+    ...order,
+    customer: order?.customer?.trim() || 'Guest',
+    note: typeof order?.note === 'string' ? order.note : '',
+    items,
+    subtotal,
+    tip,
+    total: +(subtotal + tip).toFixed(2),
+    timestamp: order?.timestamp || new Date().toISOString(),
+  };
+}
+
+function getGrossFromOrders(orders = []) {
+  return +orders.reduce((sum, order) => sum + toMoney(order?.total, 0), 0).toFixed(2);
+}
+
 function load(key, fallback) {
   try {
     const raw = localStorage.getItem(key);
@@ -19,7 +51,13 @@ function load(key, fallback) {
 }
 
 function save(key, value) {
-  try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+    return true;
+  } catch (error) {
+    if (error instanceof TypeError || error instanceof DOMException) return false;
+    throw error;
+  }
 }
 
 const TABS = [
@@ -31,8 +69,10 @@ const TABS = [
 export default function App() {
   const [tab, setTab] = useState('menu');
   const [menuItems, setMenuItems] = useState(() => load(STORAGE_KEYS.menu, []));
-  const [orders, setOrders] = useState(() => load(STORAGE_KEYS.orders, []));
-  const [balance, setBalance] = useState(() => load(STORAGE_KEYS.balance, 0));
+  const [orders, setOrders] = useState(() =>
+    load(STORAGE_KEYS.orders, []).map(normalizeOrder)
+  );
+  const balance = getGrossFromOrders(orders);
 
   useEffect(() => { save(STORAGE_KEYS.menu, menuItems); }, [menuItems]);
   useEffect(() => { save(STORAGE_KEYS.orders, orders); }, [orders]);
@@ -51,9 +91,11 @@ export default function App() {
   };
 
   const handleSubmitOrder = (order) => {
-    const newOrder = { ...order, id: Date.now(), timestamp: new Date().toISOString() };
+    const subtotal = toMoney(order?.subtotal, toMoney(order?.total, 0));
+    const tip = toMoney(order?.tip, 0);
+    const total = +(subtotal + tip).toFixed(2);
+    const newOrder = normalizeOrder({ ...order, subtotal, tip, total, id: Date.now(), timestamp: new Date().toISOString() });
     setOrders((prev) => [...prev, newOrder]);
-    setBalance((prev) => +(prev + order.total).toFixed(2));
   };
 
   return (
