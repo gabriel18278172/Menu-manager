@@ -4,6 +4,8 @@ export default function OrderBuilder({ menuItems, onSubmitOrder }) {
   const [orderItems, setOrderItems] = useState([]);
   const [customerName, setCustomerName] = useState('');
   const [note, setNote] = useState('');
+  const [tipInput, setTipInput] = useState('');
+  const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
 
   const addToOrder = (menuItem) => {
@@ -17,6 +19,7 @@ export default function OrderBuilder({ menuItems, onSubmitOrder }) {
       return [...prev, { ...menuItem, qty: 1 }];
     });
     setSuccess(false);
+    setError('');
   };
 
   const updateQty = (id, delta) => {
@@ -31,19 +34,32 @@ export default function OrderBuilder({ menuItems, onSubmitOrder }) {
     setOrderItems((prev) => prev.filter((o) => o.id !== id));
   };
 
-  const total = orderItems.reduce((sum, o) => sum + o.price * o.qty, 0);
+  const subtotal = +orderItems.reduce((sum, o) => sum + o.price * o.qty, 0).toFixed(2);
+  const parsedTip = tipInput.trim() === '' ? 0 : Number.parseFloat(tipInput);
+  const tipIsInvalid = tipInput.trim() !== '' && (!Number.isFinite(parsedTip) || parsedTip < 0);
+  const tip = tipIsInvalid ? 0 : +Math.max(parsedTip, 0).toFixed(2);
+  const total = +(subtotal + tip).toFixed(2);
 
   const handleSubmit = () => {
     if (orderItems.length === 0) return;
+    if (tipIsInvalid) {
+      setError('Tip must be a valid non-negative amount.');
+      return;
+    }
+
+    setError('');
     onSubmitOrder({
       customer: customerName.trim() || 'Guest',
       items: orderItems,
+      subtotal,
+      tip,
       total,
       note: note.trim(),
     });
     setOrderItems([]);
     setCustomerName('');
     setNote('');
+    setTipInput('');
     setSuccess(true);
     setTimeout(() => setSuccess(false), 3000);
   };
@@ -123,6 +139,24 @@ export default function OrderBuilder({ menuItems, onSubmitOrder }) {
               value={note}
               onChange={(e) => setNote(e.target.value)}
             />
+            <div>
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 font-semibold">$</span>
+                <input
+                  className={`input pl-7 ${tipIsInvalid ? 'border-red-500 focus:border-red-500 focus:ring-red-500' : ''}`}
+                  placeholder="Tip amount (optional)"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={tipInput}
+                  onChange={(e) => {
+                    setTipInput(e.target.value);
+                    if (error) setError('');
+                  }}
+                />
+              </div>
+              <p className="text-xs text-gray-500 mt-1">Tip is added to the final charge.</p>
+            </div>
           </div>
 
           {orderItems.length === 0 ? (
@@ -156,9 +190,20 @@ export default function OrderBuilder({ menuItems, onSubmitOrder }) {
 
         {/* Total & Charge */}
         <div className="card p-5">
-          <div className="flex items-center justify-between mb-4">
-            <span className="text-gray-400 font-semibold text-lg">Total</span>
-            <span className="text-3xl font-extrabold text-emerald-400">${total.toFixed(2)}</span>
+          <div className="space-y-2 mb-4">
+            <div className="flex items-center justify-between text-sm text-gray-400">
+              <span>Subtotal</span>
+              <span>${subtotal.toFixed(2)}</span>
+            </div>
+            <div className="flex items-center justify-between text-sm text-gray-400">
+              <span>Tip</span>
+              <span className="text-amber-400">${tip.toFixed(2)}</span>
+            </div>
+            <div className="border-t border-gray-800 pt-3 flex items-center justify-between">
+              <span className="text-gray-300 font-semibold text-lg">Charge Total</span>
+              <span className="text-3xl font-extrabold text-emerald-400">${total.toFixed(2)}</span>
+            </div>
+            <p className="text-xs text-gray-500">Final amount to charge: ${total.toFixed(2)}</p>
           </div>
 
           {success && (
@@ -166,11 +211,16 @@ export default function OrderBuilder({ menuItems, onSubmitOrder }) {
               <span>✅</span> Order placed & payment received!
             </div>
           )}
+          {error && (
+            <div className="mb-3 px-4 py-2.5 rounded-xl bg-red-500/10 border border-red-500/30 text-red-300 text-sm font-medium">
+              {error}
+            </div>
+          )}
 
           <button
             className="btn-success w-full text-base"
             onClick={handleSubmit}
-            disabled={orderItems.length === 0}
+            disabled={orderItems.length === 0 || tipIsInvalid}
           >
             💳 Charge ${total.toFixed(2)}
           </button>
